@@ -92,7 +92,8 @@ class AIService:
         return [p.name for p in self._providers]
 
     async def generate_text(
-        self, prompt: str, *, system: str | None = None, session_id: str | None = None
+        self, prompt: str, *, system: str | None = None, session_id: str | None = None,
+        prism_metadata: dict[str, Any] | None = None
     ) -> tuple[str, ProviderName]:
         """Try each provider in order; return (text, provider_used)."""
         input_messages: list[dict[str, Any]] = []
@@ -109,13 +110,17 @@ class AIService:
                     provider.generate_text(prompt, system=system), timeout=self._timeout
                 )
                 prov_latency = int((time.perf_counter() - prov_start) * 1000)
+                meta = {"provider": provider.name, "call_type": "generate_text"}
+                if prism_metadata:
+                    meta.update(prism_metadata)
+                
                 self._trace_call(
                     model=getattr(provider, "_model", provider.name),
                     input_messages=input_messages,
                     output=text,
                     latency_ms=prov_latency,
                     session_id=session_id,
-                    metadata={"provider": provider.name, "call_type": "generate_text"},
+                    metadata=meta,
                 )
                 return text, ProviderName(provider.name)
             except (AIProviderError, TimeoutError, asyncio.TimeoutError) as e:
@@ -134,7 +139,8 @@ class AIService:
         raise AllProvidersFailedError(str(last_error) if last_error else "no provider configured")
 
     async def generate_json(
-        self, prompt: str, *, schema: dict[str, Any], system: str | None = None, session_id: str | None = None
+        self, prompt: str, *, schema: dict[str, Any], system: str | None = None, session_id: str | None = None,
+        prism_metadata: dict[str, Any] | None = None
     ) -> tuple[str, ProviderName]:
         """Try each provider in order; return (raw_json_text, provider_used)."""
         input_messages: list[dict[str, Any]] = []
@@ -152,13 +158,17 @@ class AIService:
                     timeout=self._timeout,
                 )
                 prov_latency = int((time.perf_counter() - prov_start) * 1000)
+                meta = {"provider": provider.name, "call_type": "generate_json"}
+                if prism_metadata:
+                    meta.update(prism_metadata)
+
                 self._trace_call(
                     model=getattr(provider, "_model", provider.name),
                     input_messages=input_messages,
                     output=text,
                     latency_ms=prov_latency,
                     session_id=session_id,
-                    metadata={"provider": provider.name, "call_type": "generate_json"},
+                    metadata=meta,
                 )
                 return text, ProviderName(provider.name)
             except (AIProviderError, TimeoutError, asyncio.TimeoutError) as e:
@@ -177,7 +187,8 @@ class AIService:
         raise AllProvidersFailedError(str(last_error) if last_error else "no provider configured")
 
     async def stream_text(
-        self, prompt: str, *, system: str | None = None, session_id: str | None = None
+        self, prompt: str, *, system: str | None = None, session_id: str | None = None,
+        prism_metadata: dict[str, Any] | None = None
     ) -> AsyncIterator[tuple[str, ProviderName]]:
         """Yield (chunk, provider_used) tuples.
 
@@ -205,13 +216,17 @@ class AIService:
                     collected_chunks.append(chunk)
                     yield chunk, ProviderName(provider.name)
                 prov_latency = int((time.perf_counter() - prov_start) * 1000)
+                meta = {"provider": provider.name, "call_type": "stream_text"}
+                if prism_metadata:
+                    meta.update(prism_metadata)
+
                 self._trace_call(
                     model=getattr(provider, "_model", provider.name),
                     input_messages=input_messages,
                     output="".join(collected_chunks),
                     latency_ms=prov_latency,
                     session_id=session_id,
-                    metadata={"provider": provider.name, "call_type": "stream_text"},
+                    metadata=meta,
                 )
                 return
             except (AIProviderError, TimeoutError, asyncio.TimeoutError) as e:

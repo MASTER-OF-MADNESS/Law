@@ -38,6 +38,7 @@ async def stream_answer(
     *,
     route: str = "legal",
     slots: dict[str, str] | None = None,
+    prism_metadata: dict[str, Any] | None = None,
 ) -> AsyncIterator[tuple[str, ProviderName]]:
     """Yield (chunk, provider_used) tuples for the final answer.
 
@@ -62,7 +63,9 @@ async def stream_answer(
 
     partial = ""
     try:
-        async for chunk, provider in ai_service.stream_text(prompt, system=system_prompt):
+        async for chunk, provider in ai_service.stream_text(
+            prompt, system=system_prompt, prism_metadata=prism_metadata
+        ):
             partial += chunk
             yield chunk, provider
     except AllProvidersFailedError as e:

@@ -32,6 +32,7 @@ class GroqProvider(AIProvider):
             completion = await self._client.chat.completions.create(
                 model=self._model,
                 messages=messages,
+                max_tokens=8192,
             )
         except _RETRYABLE_ERRORS as e:
             raise AIProviderError(self.name, f"generate_text failed: {e}", cause=e) from e
@@ -61,6 +62,7 @@ class GroqProvider(AIProvider):
                 model=self._model,
                 messages=messages,
                 response_format={"type": "json_object"},
+                max_tokens=8192,
             )
         except _RETRYABLE_ERRORS as e:
             raise AIProviderError(self.name, f"generate_json failed: {e}", cause=e) from e
@@ -78,6 +80,7 @@ class GroqProvider(AIProvider):
                 model=self._model,
                 messages=messages,
                 stream=True,
+                max_tokens=8192,
             )
         except _RETRYABLE_ERRORS as e:
             raise AIProviderError(self.name, f"stream_text failed to start: {e}", cause=e) from e

@@ -29,7 +29,10 @@ class GeminiProvider(AIProvider):
             response = await self._client.models.generate_content(
                 model=self._model,
                 contents=prompt,
-                config=genai_types.GenerateContentConfig(system_instruction=system),
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=system,
+                    max_output_tokens=8192,
+                ),
             )
         except genai_errors.APIError as e:
             raise AIProviderError(self.name, f"generate_text failed: {e}", cause=e) from e
@@ -53,6 +56,7 @@ class GeminiProvider(AIProvider):
                     system_instruction=system,
                     response_mime_type="application/json",
                     response_schema=schema,
+                    max_output_tokens=8192,
                 ),
             )
         except genai_errors.APIError as e:
@@ -69,7 +73,10 @@ class GeminiProvider(AIProvider):
             stream = await self._client.models.generate_content_stream(
                 model=self._model,
                 contents=prompt,
-                config=genai_types.GenerateContentConfig(system_instruction=system),
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=system,
+                    max_output_tokens=8192,
+                ),
             )
         except genai_errors.APIError as e:
             raise AIProviderError(self.name, f"stream_text failed to start: {e}", cause=e) from e

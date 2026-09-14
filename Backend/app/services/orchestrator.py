@@ -320,6 +320,7 @@ async def _run_answer(
         async for chunk, provider in stream_answer(
             ai_service, state.original_question, context_blocks, history_text,
             route=state.route.value, slots=state.slots,
+            prism_metadata={"intent": state.analysis.intent} if state.analysis else None,
         ):
             full_answer += chunk
             answer_provider = provider
