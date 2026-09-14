@@ -33,6 +33,11 @@ async def lifespan(app: FastAPI):
     logger.info("AI providers configured: %s", app.state.ai_service.configured_providers or "NONE")
     logger.info("Tavily configured: %s", settings.has_tavily)
     logger.info(
+        "PRISM tracing configured: %s (project %s)",
+        settings.has_prismtrace,
+        settings.prismtrace_project_id if settings.has_prismtrace else "NONE",
+    )
+    logger.info(
         "Knowledge base: %d sections loaded from %s",
         app.state.knowledge_service.section_count,
         app.state.knowledge_service.file_paths,
@@ -49,7 +54,10 @@ async def lifespan(app: FastAPI):
         )
 
     yield
-    logger.info("Shutting down LAWoud backend.")
+    logger.info("Shutting down LAWoud backend...")
+    if hasattr(app.state, "ai_service") and hasattr(app.state.ai_service, "close"):
+        app.state.ai_service.close()
+    logger.info("Shutdown complete.")
 
 
 app = FastAPI(

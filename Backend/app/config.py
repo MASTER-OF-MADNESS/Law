@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     groq_model: str = "openai/gpt-oss-120b"
     ai_timeout_seconds: float = 30.0
 
+    # --- PRISM live instrumentation ---
+    prismtrace_api_key: str = ""
+    prismtrace_project_id: str = ""
+    prismtrace_host: str = "https://prism-api-prod.up.railway.app"
+
     # --- Web search ---
     tavily_api_key: str = ""
     web_search_max_results: int = 6
@@ -110,6 +115,10 @@ class Settings(BaseSettings):
     @property
     def has_tavily(self) -> bool:
         return bool(self.tavily_api_key.strip())
+
+    @property
+    def has_prismtrace(self) -> bool:
+        return bool(self.prismtrace_api_key.strip() and self.prismtrace_project_id.strip())
 
 
 @lru_cache

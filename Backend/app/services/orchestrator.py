@@ -54,6 +54,8 @@ from app.services.legal_assistance_service import get_legal_assistance, load_nat
 from app.services.session_store import ConversationState, SessionStore
 from app.services.web_search_service import WebSearchService
 
+import prismtrace
+
 logger = logging.getLogger("lawoud.orchestrator")
 
 
@@ -64,6 +66,29 @@ class PipelineEvent:
 
 
 async def run(
+    request: ChatRequest,
+    *,
+    ai_service: AIService,
+    knowledge_service: KnowledgeService,
+    web_search_service: WebSearchService,
+    lawyer_directory_service: LawyerDirectoryService,
+    session_store: SessionStore,
+) -> AsyncIterator[PipelineEvent]:
+    import uuid
+    session_id = (request.conversation_id or "").strip() or str(uuid.uuid4())
+    with prismtrace.session(session_id):
+        async for event in _run_pipeline(
+            request,
+            ai_service=ai_service,
+            knowledge_service=knowledge_service,
+            web_search_service=web_search_service,
+            lawyer_directory_service=lawyer_directory_service,
+            session_store=session_store,
+        ):
+            yield event
+
+
+async def _run_pipeline(
     request: ChatRequest,
     *,
     ai_service: AIService,
