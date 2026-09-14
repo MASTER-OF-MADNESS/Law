@@ -1247,7 +1247,7 @@
     });
 
     // Legal Help
-    DOM.legalHelpCtaBtn.addEventListener('click', openLegalHelp);
+    if (DOM.legalHelpCtaBtn) DOM.legalHelpCtaBtn.addEventListener('click', openLegalHelp);
     DOM.legalHelpModalClose.addEventListener('click', closeAllModals);
 
     // Chat History Modal
