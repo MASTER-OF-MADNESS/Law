@@ -21,3 +21,6 @@ pypdf==6.16.1                 # text extraction from official DLSA/SLSA panel PD
 
 # --- Semantic retrieval (optional; keyword-only fallback if absent) ---
 sentence-transformers==6.0.1  # local embeddings for the hybrid knowledge search
+
+# --- Observability / Tracing ---
+prismtrace-sdk>=0.4.3
