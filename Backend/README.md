@@ -61,7 +61,7 @@ python scripts/demo_client.py "How do I file an FIR?"
 
 ## 3. The knowledge corpus
 
-Two Markdown files are loaded together as one searchable corpus, each with its
+Four Markdown files are loaded together as one searchable corpus, each with its
 own parser, each hot-reloading independently on change (no restart needed):
 
 **`General provisions all.md`** (`CONSTITUTION_FILE`) — the Constitution of
@@ -91,10 +91,34 @@ bounce, ...), parsed generically by heading:
   Your section content here...
   ```
 
+Two more corpora use the exact same generic heading parser and metadata
+format — they exist as separate files only to keep authoring manageable:
+
+- **`data/common_offenses.md`** (`OFFENSES_FILE`) — everyday offences
+  relevant to common disputes, with both IPC and BNS (2023) references:
+  cheque bounce under Section 138 NI Act, dowry demand/harassment and dowry
+  death, theft, assault/criminal force and hurt, criminal intimidation,
+  defamation, cheating.
+- **`data/tenancy_and_consumer.md`** (`TENANCY_CONSUMER_FILE`) — tenancy
+  and rent-deposit basics (deposit refund, agreements, eviction,
+  receipts, repairs) and the consumer-complaint procedure end to end
+  (who/what/where/how to file, reliefs, limitation).
+
 Check `GET /api/knowledge/status` to confirm how many sections were parsed
-from each file after swapping either one — a Constitution count near 128
+from each file after swapping any of them — a Constitution count near 128
 instead of ~470 means the per-Article parser didn't engage and the file is
 being blind-chunked.
+
+**Hybrid retrieval (optional).** If `sentence-transformers` is installed, each
+section is embedded once per content version at startup with a local model
+(`SEMANTIC_MODEL_NAME`, default `all-MiniLM-L6-v2`); embeddings are cached on
+disk under `SEMANTIC_CACHE_DIR` keyed by content hash, so a boot only
+re-embeds files that actually changed. At query time the keyword score is
+min-max normalized and blended with cosine similarity —
+`0.6 * keyword_normalized + 0.4 * cosine` — and that combined 0-1 score is
+what the sufficiency gate checks (against `KNOWLEDGE_MIN_COMBINED_SCORE`).
+Set `SEMANTIC_SEARCH_ENABLED=false` for keyword-only retrieval; the same
+fallback applies automatically if the model can't be loaded.
 
 ### The lawyer directory (optional)
 
@@ -267,7 +291,8 @@ app/
     session_store.py          in-memory per-conversation state (TTL, no persistence)
     intake_service.py         one LLM call/turn: analysis + moral/legal/mixed routing + next question
     constitution_parser.py    per-Article parser for the headingless Constitution file
-    knowledge_service.py      loads both corpus files, keyword search + sufficiency gate
+    knowledge_service.py      loads all corpus files, keyword search + sufficiency gate
+    embedding_service.py      optional sentence-transformers model for hybrid retrieval
     web_search_service.py     whitelisted Tavily search
     answer_service.py         streaming generation from retrieved context only (route-aware prompt)
     citation_service.py       unifies local/web results into one Citation shape

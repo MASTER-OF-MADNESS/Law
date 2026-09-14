@@ -85,6 +85,12 @@ def check_knowledge() -> None:
         _fail(f"file exists but 0 sections parsed: {settings.knowledge_path}")
         return
     _ok(f"{ks.section_count} sections parsed from {settings.knowledge_path}")
+    if ks.semantic_active:
+        _ok(f"semantic retrieval active ({settings.semantic_model_name})")
+    elif settings.semantic_search_enabled:
+        _fail("semantic search enabled but embedding model unavailable — running keyword-only")
+    else:
+        _skip("semantic search disabled — keyword-only retrieval")
 
 
 async def main() -> None:

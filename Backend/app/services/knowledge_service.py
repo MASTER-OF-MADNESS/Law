@@ -1,19 +1,28 @@
 """Local Markdown knowledge corpus: parse, index, search, sufficiency gate.
 
-Two files are loaded side by side and searched as one corpus:
+Multiple files are loaded side by side and searched as one corpus:
 
 * the Constitution of India file, which has no Markdown headings and is parsed
   per-Article by :mod:`app.services.constitution_parser`;
-* a heading-structured guide file (``data/legal_knowledge.md``) covering the
-  procedural topics the Constitution does not — FIR filing, tenancy, cheque
-  bounce and so on — parsed by the generic heading parser below.
+* heading-structured guide files — ``data/legal_knowledge.md`` (general
+  procedures: FIR filing, RTI, legal aid), ``data/common_offenses.md``
+  (everyday IPC/BNS offences) and ``data/tenancy_and_consumer.md`` (tenancy,
+  deposits, consumer complaints) — parsed by the generic heading parser
+  below.
 
 The generic parser works on PLAIN markdown with nothing but headings; metadata
-lines are an optional scoring boost, never a requirement. Both files hot-reload
-independently on mtime change, so either can be swapped mid-demo without a
-restart.
+lines are an optional scoring boost, never a requirement. All files hot-reload
+independently on mtime change, so any of them can be swapped mid-demo without
+a restart.
+
+Optionally, each section is also embedded once per content version with a
+local sentence-transformers model (embeddings cached on disk, keyed by content
+hash), and a query's cosine similarity is blended with the keyword score into
+a combined score. When the embedding stack is disabled or fails to load, every
+path below degrades to keyword-only transparently.
 """
 
+import hashlib
 import logging
 import re
 from collections.abc import Callable
@@ -24,6 +33,13 @@ from pathlib import Path
 from app.config import Settings
 from app.core.text import normalize
 from app.services import constitution_parser
+
+try:
+    import numpy as np
+    from app.services.embedding_service import EmbeddingService
+except ImportError:  # numpy / sentence-transformers absent -> keyword-only
+    np = None
+    EmbeddingService = None
 
 logger = logging.getLogger("lawoud.knowledge_service")
 
@@ -39,6 +55,13 @@ _PHRASE_MATCH_BONUS = 2.0
 # This has to outweigh any accumulation of ordinary keyword hits.
 _ARTICLE_EXACT_BONUS = 25.0
 _ARTICLE_MENTION_RE = re.compile(r"\b(?:article|art\.?)\s*(\d+[A-Za-z]{0,3})\b", re.IGNORECASE)
+
+# Hybrid blend: final = (1 - w) * keyword_score_normalized + w * cosine.
+_SEMANTIC_WEIGHT = 0.4
+# Minimum cosine for a section with zero keyword hits to enter the candidate
+# set at all — even unrelated texts get nonzero similarity, so without a floor
+# every corpus section would be a "match".
+_SEMANTIC_CANDIDATE_FLOOR = 0.25
 
 
 @dataclass
@@ -66,8 +89,10 @@ class KnowledgeSection:
 @dataclass
 class ScoredSection:
     section: KnowledgeSection
-    score: float
+    score: float  # effective score: combined when hybrid is active, keyword otherwise
     coverage: float  # fraction of query keywords matched anywhere in this section
+    keyword_score: float = 0.0  # raw weighted keyword score (pre-normalization)
+    semantic_score: float = 0.0  # cosine similarity, clamped to [0, 1]
 
 
 class KnowledgeSource:
@@ -79,12 +104,25 @@ class KnowledgeSource:
         self.label = label
         self.sections: list[KnowledgeSection] = []
         self.mtime: float | None = None
+        # Per-content-version embedding matrix (rows parallel to sections) and
+        # the corpus hash it was built from — populated only when the semantic
+        # layer is enabled and healthy.
+        self.embeddings = None  # np.ndarray | None
+        self.embedding_fp: str | None = None
 
 
 class KnowledgeService:
     def __init__(self, settings: Settings):
         self._settings = settings
         self._last_loaded: datetime | None = None
+        # Semantic layer — None when numpy/sentence-transformers is absent;
+        # is_available False when the model itself failed to load.
+        self._embeddings = EmbeddingService(settings) if EmbeddingService is not None else None
+        self._emb_sections: list[KnowledgeSection] = []
+        self._emb_matrix = None  # np.ndarray | None — rows parallel to _emb_sections
+        self._emb_row_of: dict[int, int] = {}
+        self._model_tag = re.sub(r"[^A-Za-z0-9]+", "-", settings.semantic_model_name)
+        self._cache_dir = settings.semantic_cache_path
         self._sources: list[KnowledgeSource] = [
             KnowledgeSource(
                 settings.constitution_path,
@@ -95,6 +133,16 @@ class KnowledgeService:
                 settings.knowledge_path,
                 lambda text: self._parse(text, settings.knowledge_max_section_chars),
                 "guide",
+            ),
+            KnowledgeSource(
+                settings.offenses_path,
+                lambda text: self._parse(text, settings.knowledge_max_section_chars),
+                "offenses",
+            ),
+            KnowledgeSource(
+                settings.tenancy_consumer_path,
+                lambda text: self._parse(text, settings.knowledge_max_section_chars),
+                "tenancy_consumer",
             ),
         ]
         self.reload_if_changed()
@@ -133,11 +181,22 @@ class KnowledgeService:
     def file_paths(self) -> list[str]:
         return [str(source.path) for source in self._sources]
 
+    @property
+    def semantic_active(self) -> bool:
+        """True when hybrid keyword+semantic scoring is in effect this boot."""
+        return (
+            np is not None
+            and self._embeddings is not None
+            and self._embeddings.is_available
+            and self._emb_matrix is not None
+        )
+
     def reload_if_changed(self) -> bool:
         """Re-parse any source file that changed on disk. True if anything reloaded."""
         reloaded = any([self._reload_source(source) for source in self._sources])
         if reloaded:
             self._last_loaded = datetime.now(timezone.utc)
+            self._rebuild_semantic_index()
         return reloaded
 
     def _reload_source(self, source: KnowledgeSource) -> bool:
@@ -171,9 +230,124 @@ class KnowledgeService:
             )
             return False
 
+        self._refresh_source_embeddings(source, text)
         source.mtime = mtime
         logger.info("Loaded %d %s sections from %s", len(source.sections), source.label, source.path)
         return True
+
+    # -- semantic index ------------------------------------------------------
+
+    def _cache_file_for(self, source: KnowledgeSource, fp: str) -> Path:
+        return self._cache_dir / f"{source.label}_{self._model_tag}_{fp}.npz"
+
+    def _refresh_source_embeddings(self, source: KnowledgeSource, text: str) -> None:
+        """Embed a just-parsed source, reusing the on-disk cache when the file
+        content (not just its mtime) is unchanged since the last embed run."""
+        source.embeddings = None
+        source.embedding_fp = None
+        if self._embeddings is None or not self._embeddings.is_available or np is None:
+            return
+
+        fp = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+        cache_file = self._cache_file_for(source, fp)
+
+        if cache_file.exists():
+            try:
+                arr = np.load(cache_file)["embeddings"]
+                if arr.shape[0] == len(source.sections):
+                    source.embeddings = np.asarray(arr, dtype=np.float32)
+                    source.embedding_fp = fp
+                    logger.info(
+                        "Loaded %d cached embeddings for %s", arr.shape[0], source.label
+                    )
+                    return
+                logger.warning(
+                    "Embedding cache %s has %d rows for %d sections; recomputing.",
+                    cache_file, arr.shape[0], len(source.sections),
+                )
+            except Exception as e:
+                logger.warning("Failed to read embedding cache %s: %s", cache_file, e)
+
+        texts = [f"{s.breadcrumb}\n{s.body}" for s in source.sections]
+        arr = self._embeddings.encode(texts)
+        if arr is None:
+            return
+        source.embeddings = arr
+        source.embedding_fp = fp
+
+        try:
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            for stale in cache_file.parent.glob(f"{source.label}_{self._model_tag}_*.npz"):
+                if stale != cache_file:
+                    stale.unlink()
+            np.savez(cache_file, embeddings=arr)
+        except OSError as e:
+            logger.warning("Failed to write embedding cache %s: %s", cache_file, e)
+
+    def _rebuild_semantic_index(self) -> None:
+        """Flatten all embedded sources into one aligned section list + matrix."""
+        self._emb_sections = []
+        self._emb_row_of = {}
+        mats = []
+        for source in self._sources:
+            if source.embeddings is None:
+                continue
+            for section in source.sections:
+                self._emb_row_of[id(section)] = len(self._emb_sections)
+                self._emb_sections.append(section)
+            mats.append(source.embeddings)
+        self._emb_matrix = np.vstack(mats) if mats else None
+
+    def _apply_semantic_ranking(
+        self, kw_scored: list[ScoredSection], query_text: str, top_k: int
+    ) -> list[ScoredSection] | None:
+        """Blend cosine similarity into the keyword-ranked sections.
+
+        Combined score = (1 - _SEMANTIC_WEIGHT) * keyword_score_normalized
+                       + _SEMANTIC_WEIGHT * cosine_similarity,
+        where keyword_score_normalized is min-max over this query's keyword
+        hits (best = 1.0). Sections the keyword scorer missed entirely join the
+        candidate set when their similarity clears _SEMANTIC_CANDIDATE_FLOOR.
+        Returns None when the query can't be embedded — caller falls back to
+        the keyword-only ranking.
+        """
+        query_vec = self._embeddings.encode_query(query_text)
+        if query_vec is None:
+            return None
+
+        sims = self._emb_matrix @ query_vec  # normalized rows -> cosine via dot
+
+        merged: dict[int, ScoredSection] = {}
+        for scored in kw_scored:
+            scored.keyword_score = scored.score
+            row = self._emb_row_of.get(id(scored.section))
+            scored.semantic_score = max(0.0, float(sims[row])) if row is not None else 0.0
+            merged[id(scored.section)] = scored
+
+        for row, section in enumerate(self._emb_sections):
+            if id(section) in merged:
+                continue
+            # Same omitted-Article filter as the keyword pass — the embedding
+            # matrix is built over every parsed section, filtered or not.
+            if not self._settings.include_omitted_articles and constitution_parser.is_omitted_status(
+                section.status
+            ):
+                continue
+            sem = float(sims[row])
+            if sem < _SEMANTIC_CANDIDATE_FLOOR:
+                continue
+            merged[id(section)] = ScoredSection(
+                section=section, score=0.0, coverage=0.0, semantic_score=max(0.0, sem)
+            )
+
+        max_kw = max((s.keyword_score for s in merged.values()), default=0.0)
+        kw_weight = 1.0 - _SEMANTIC_WEIGHT
+        ranked = list(merged.values())
+        for scored in ranked:
+            kw_norm = scored.keyword_score / max_kw if max_kw > 0 else 0.0
+            scored.score = kw_weight * kw_norm + _SEMANTIC_WEIGHT * scored.semantic_score
+        ranked.sort(key=lambda s: s.score, reverse=True)
+        return ranked[:top_k]
 
     def search(self, keywords: list[str], *, top_k: int | None = None) -> list[ScoredSection]:
         """Rank sections by relevance to *keywords*. Empty keywords -> empty result."""
@@ -202,7 +376,16 @@ class KnowledgeService:
                 score += _ARTICLE_EXACT_BONUS
                 coverage = 1.0
             if score > 0:
-                scored.append(ScoredSection(section=section, score=score, coverage=coverage))
+                scored.append(
+                    ScoredSection(
+                        section=section, score=score, coverage=coverage, keyword_score=score
+                    )
+                )
+
+        if self.semantic_active:
+            hybrid = self._apply_semantic_ranking(scored, " ".join(norm_keywords), top_k)
+            if hybrid is not None:
+                return hybrid
 
         scored.sort(key=lambda s: s.score, reverse=True)
         return scored[:top_k]
@@ -212,9 +395,16 @@ class KnowledgeService:
         if not scored:
             return False
         best = scored[0]
+        # Hybrid runs produce a combined 0-1 score, so the raw keyword
+        # threshold would never be reachable — swap in the combined-scale one.
+        min_score = (
+            self._settings.knowledge_min_combined_score
+            if self.semantic_active
+            else self._settings.knowledge_min_score
+        )
         total_chars = sum(len(s.section.body) for s in scored)
         return (
-            best.score >= self._settings.knowledge_min_score
+            best.score >= min_score
             and best.coverage >= self._settings.knowledge_min_coverage
             and total_chars >= self._settings.knowledge_min_context_chars
         )
