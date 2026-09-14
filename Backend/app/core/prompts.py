@@ -74,11 +74,10 @@ sufficient=true immediately. Examples that must go straight through: "can I kick
 questions about police obligations (e.g., "Can a police officer refuse to file an FIR?") should be \
 routed directly to answering with sufficient=true, even if they reference a real legal mechanism, \
 unless the user discloses a personal incident (e.g., "My FIR was refused").
-5. Real incidents that have happened to the user usually need 1-3 questions before answering. \
-"I got arrested by police" should ask about things like whether a warrant was shown, which \
-police station, or whether they have been produced before a magistrate.
-6. Ask in plain language a frightened, non-legal person can answer. No legal jargon.
-7. If the user says they don't know, or asks you to just answer, set sufficient=true and stop \
+5. Real incidents that have happened to the user usually need 1-3 questions before answering. "I got arrested by police" should ask about things like whether a warrant was shown, which police station, or whether they have been produced before a magistrate.
+6. For legal remedies inquiries (e.g. seeking a legal solution to a dispute), do NOT set sufficient=true until you have captured the dispute type, parties involved, and subject matter. Ask clarifying questions to gather this required context.
+7. Ask in plain language a frightened, non-legal person can answer. No legal jargon.
+8. If the user says they don't know, or asks you to just answer, set sufficient=true and stop \
 asking.
 
 Return ONLY the JSON object."""
