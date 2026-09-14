@@ -473,6 +473,10 @@
 
     state.currentChatId = chatId;
     state.currentMessages = [...conv.messages];
+    // A saved chat has no backend conversation — a stale id would let the
+    // server misread the next message as a reply to the old topic's pending
+    // question or location request.
+    state.conversationId = null;
 
     switchToChat();
     DOM.chatMessages.innerHTML = '';
@@ -495,6 +499,7 @@
     };
     state.currentChatId = newId;
     state.currentMessages = state.conversations[newId].messages;
+    state.conversationId = null;
 
     switchToChat();
     DOM.chatMessages.innerHTML = '';
@@ -741,7 +746,7 @@
   }
 
   // ======================== SEND MESSAGE ========================
-  function sendMessage() {
+  function sendMessage(skipQuestions) {
     const text = DOM.chatInput.value.trim();
     if (!text || state.streaming) return;
 
@@ -763,11 +768,12 @@
       };
       state.currentChatId = newId;
       state.currentMessages = state.conversations[newId].messages;
+      state.conversationId = null;
       renderRecentChats();
     }
 
     addMessage('user', text);
-    streamChatResponse(text);
+    streamChatResponse(text, skipQuestions);
   }
 
   // ======================== LIVE BACKEND STREAMING ========================
@@ -921,7 +927,7 @@
       .map(m => ({ role: m.type === 'user' ? 'user' : 'assistant', content: m.text }));
   }
 
-  async function streamChatResponse(question) {
+  async function streamChatResponse(question, skipQuestions) {
     state.streaming = true;
     setSendEnabled(false);
     showTypingIndicator();
@@ -956,6 +962,7 @@
           question,
           history: history.length ? history : null,
           conversation_id: state.conversationId,
+          skip_questions: !!skipQuestions,
         }),
         signal: controller.signal,
       });
@@ -1044,7 +1051,7 @@
     if (questionData && questionData.can_skip) {
       renderSkipChip(shell.extrasEl, () => {
         DOM.chatInput.value = "Skip — just answer with what I've told you";
-        sendMessage();
+        sendMessage(true);
       });
     }
 

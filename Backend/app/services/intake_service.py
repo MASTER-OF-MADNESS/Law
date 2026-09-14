@@ -66,6 +66,8 @@ async def run_intake_turn(
     state: ConversationState,
     latest_message: str,
     history: list[dict[str, str]] | None,
+    *,
+    force_skip: bool = False,
 ) -> tuple[IntakeResult, ProviderName]:
     """Run one intake turn. Falls back to a heuristic pass-through (no questions
     asked) if both AI providers are unavailable, so retrieval can still proceed."""
@@ -85,7 +87,7 @@ async def run_intake_turn(
         logger.warning("Malformed intake JSON, skipping to answer: %s", e)
         return _heuristic_intake(state.original_question), ProviderName.HEURISTIC
 
-    if wants_to_skip(latest_message) or not state.can_ask_more:
+    if wants_to_skip(latest_message) or force_skip or not state.can_ask_more:
         result.sufficient = True
         result.next_question = ""
 

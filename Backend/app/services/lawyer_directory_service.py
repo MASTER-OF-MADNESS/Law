@@ -247,8 +247,17 @@ class LawyerDirectoryService:
         any_category_match = any(overlap for overlap, _ in scored if overlap > 3.0)
         scope = MatchScope.DISTRICT_CATEGORY if any_category_match else MatchScope.DISTRICT_ONLY
 
+        # The source file repeats some advocates in multiple category blocks —
+        # one entry per name, best-scored block wins.
         results: list[AdvocateResult] = []
-        for score, entry in scored[:_MAX_RESULTS]:
+        seen_names: set[str] = set()
+        for score, entry in scored:
+            name_key = re.sub(r"[.\s]+", "", entry.name).lower()
+            if name_key in seen_names:
+                continue
+            seen_names.add(name_key)
+            if len(results) >= _MAX_RESULTS:
+                break
             reason_bits = [f"Listed in the LAWoud curated advocate directory for {entry.city}"]
             if entry.category_heading:
                 reason_bits.append(f"under {entry.category_heading}")

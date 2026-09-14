@@ -155,7 +155,9 @@ async def _run_intake_and_answer(
     previous_category = state.analysis.legal_category if state.analysis else None
     previous_route = state.route if state.analysis else None
 
-    intake_result, intake_provider = await run_intake_turn(ai_service, state, request.question, history)
+    intake_result, intake_provider = await run_intake_turn(
+        ai_service, state, request.question, history, force_skip=request.skip_questions
+    )
 
     if previous_category and previous_category != "other" and intake_result.legal_category == "other":
         intake_result.legal_category = previous_category
