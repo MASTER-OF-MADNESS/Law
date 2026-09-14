@@ -1166,16 +1166,24 @@
 
   // ======================== EVENT LISTENERS ========================
   function bindEvents() {
+    // One missing element must not abort the rest of the bindings — a single
+    // null.addEventListener previously left the chat input and send button
+    // permanently dead.
+    const on = (el, event, fn) => {
+      if (el) el.addEventListener(event, fn);
+      else console.warn('bindEvents: element missing, skipped a', event, 'handler');
+    };
+
     // Sidebar
-    DOM.mobileMenuBtn.addEventListener('click', () => {
+    on(DOM.mobileMenuBtn, 'click', () => {
       if (window.innerWidth <= 768) {
         openSidebar();
       } else {
         toggleSidebarDesktop();
       }
     });
-    DOM.sidebarOverlay.addEventListener('click', closeSidebar);
-    DOM.sidebarCollapseBtn.addEventListener('click', () => {
+    on(DOM.sidebarOverlay, 'click', closeSidebar);
+    on(DOM.sidebarCollapseBtn, 'click', () => {
       if (window.innerWidth <= 768) {
         closeSidebar();
       } else {
@@ -1189,17 +1197,17 @@
     });
 
     // New Chat
-    DOM.newChatSidebar.addEventListener('click', newChat);
-    DOM.newChatHeader.addEventListener('click', newChat);
+    on(DOM.newChatSidebar, 'click', newChat);
+    on(DOM.newChatHeader, 'click', newChat);
 
     // Textarea Auto-Resize Focus and Input
-    DOM.chatInput.addEventListener('input', () => {
+    on(DOM.chatInput, 'input', () => {
       DOM.chatInput.style.height = 'auto';
       DOM.chatInput.style.height = DOM.chatInput.scrollHeight + 'px';
     });
 
     // Account
-    DOM.accountBtn.addEventListener('click', (e) => {
+    on(DOM.accountBtn, 'click', (e) => {
       e.stopPropagation();
       toggleAccountMenu();
     });
@@ -1231,9 +1239,9 @@
     });
 
     // Share
-    DOM.shareBtn.addEventListener('click', openShareModal);
-    DOM.shareModalClose.addEventListener('click', closeAllModals);
-    DOM.shareCopyBtn.addEventListener('click', () => {
+    on(DOM.shareBtn, 'click', openShareModal);
+    on(DOM.shareModalClose, 'click', closeAllModals);
+    on(DOM.shareCopyBtn, 'click', () => {
       DOM.shareLinkInput.select();
       navigator.clipboard.writeText(DOM.shareLinkInput.value).then(() => {
         showToast('Link copied to clipboard');
@@ -1242,37 +1250,54 @@
     });
 
     // Save Chat
-    DOM.saveChatBtn.addEventListener('click', () => {
+    on(DOM.saveChatBtn, 'click', () => {
       showToast('Chat saved successfully');
     });
 
     // Legal Help
-    DOM.legalHelpCtaBtn.addEventListener('click', openLegalHelp);
-    DOM.legalHelpModalClose.addEventListener('click', closeAllModals);
+    on(DOM.legalHelpCtaBtn, 'click', openLegalHelp);
+    on(DOM.legalHelpModalClose, 'click', closeAllModals);
+
+    // Legal Help modal options — each seeds the chat with the matching
+    // request and sends it through the normal backend flow ("Find a Lawyer"
+    // is what triggers the assistant's location hand-off).
+    $$('#legalHelpModal .modal-option').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const label = btn.querySelector('span')?.textContent.trim();
+        const prompts = {
+          'Find Legal Aid': 'I need free legal aid — which organizations or helplines can help me?',
+          'Find a Lawyer': 'I need to find a lawyer or advocate near me for my legal issue.',
+          'Relevant Authority': 'Which authority or forum should I approach for my legal issue?',
+        };
+        closeAllModals();
+        DOM.chatInput.value = prompts[label] || 'I need legal help.';
+        sendMessage();
+      });
+    });
 
     // Chat History Modal
-    DOM.chatHistoryModalClose.addEventListener('click', closeAllModals);
+    on(DOM.chatHistoryModalClose, 'click', closeAllModals);
 
     // Modal overlay close
-    DOM.modalOverlay.addEventListener('click', closeAllModals);
+    on(DOM.modalOverlay, 'click', closeAllModals);
 
     // Chat Input
-    DOM.chatInput.addEventListener('keypress', (e) => {
+    on(DOM.chatInput, 'keypress', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         sendMessage();
       }
     });
 
-    DOM.sendBtn.addEventListener('click', sendMessage);
+    on(DOM.sendBtn, 'click', sendMessage);
 
     // File attachment
-    DOM.attachBtn.addEventListener('click', () => DOM.fileInput.click());
-    DOM.fileInput.addEventListener('change', handleFileSelect);
-    DOM.removeFileBtn.addEventListener('click', removeAttachment);
+    on(DOM.attachBtn, 'click', () => DOM.fileInput.click());
+    on(DOM.fileInput, 'change', handleFileSelect);
+    on(DOM.removeFileBtn, 'click', removeAttachment);
 
     // Mic
-    DOM.micBtn.addEventListener('click', toggleRecording);
+    on(DOM.micBtn, 'click', toggleRecording);
 
     // Keyboard: Escape
     document.addEventListener('keydown', (e) => {
